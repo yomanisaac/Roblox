@@ -1,0 +1,234 @@
+local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+local portal = workspace.Portals["Arena Frame"].Portal
+local clickDistance = 10
+local detectionRange = 10 -- Only target players within 10 studs
+local clickRate = 0.1
+local maxChaseTime = 6
+local jumpInterval = 0.3
+
+local enabled = false
+local currentTarget = nil
+local chaseStartTime = 0
+local lastJumpTime = 0
+local needsPortal = true
+local wanderTarget = nil
+
+local function spamJump()
+    if tick() - lastJumpTime >= jumpInterval and humanoid and humanoid.Health > 0 then
+        humanoid.Jump = true
+        lastJumpTime = tick()
+    end
+end
+
+local function isRealPlayer(otherPlayer)
+    if otherPlayer.UserId <= 0 then
+        return false
+    end
+    
+    if otherPlayer.AccountAge == 0 then
+        return false
+    end
+    
+    local name = otherPlayer.Name
+    if name:match("^Bot") or name:match("NPC$") or name:match("^AI") then
+        return false
+    end
+    
+    return true
+end
+
+local function getClosestRealPlayerInRange()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+    
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character and isRealPlayer(otherPlayer) then
+            local otherHumanoid = otherPlayer.Character:FindFirstChild("Humanoid")
+            local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if otherRoot and otherHumanoid and otherHumanoid.Health > 0 and rootPart then
+                local distance = (rootPart.Position - otherRoot.Position).Magnitude
+                if distance <= detectionRange and distance < shortestDistance then
+                    shortestDistance = distance
+                    closestPlayer = otherPlayer
+                end
+            end
+        end
+    end
+    
+    return closestPlayer, shortestDistance
+end
+
+local function simulateClick()
+    local mouse = player:GetMouse()
+    VirtualInputManager:SendMouseButtonEvent(mouse.X, mouse.Y, 0, true, game, 1)
+    wait(0.01)
+    VirtualInputManager:SendMouseButtonEvent(mouse.X, mouse.Y, 0, false, game, 1)
+end
+
+local function isTargetValid(target)
+    if not target or not target.Character or not isRealPlayer(target) then
+        return false
+    end
+    local targetHumanoid = target.Character:FindFirstChild("Humanoid")
+    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHumanoid or not targetRoot or targetHumanoid.Health <= 0 then
+        return false
+    end
+    
+    -- Check if target is still in range
+    local distance = (rootPart.Position - targetRoot.Position).Magnitude
+    return distance <= detectionRange * 2 -- Give some leeway to continue chase
+end
+
+local function getRandomWanderPosition()
+    local randomAngle = math.random() * math.pi * 2
+    local randomDistance = math.random(15, 30)
+    
+    local offsetX = math.cos(randomAngle) * randomDistance
+    local offsetZ = math.sin(randomAngle) * randomDistance
+    
+    return rootPart.Position + Vector3.new(offsetX, 0, offsetZ)
+end
+
+local function wander()
+    if not wanderTarget or (rootPart.Position - wanderTarget).Magnitude < 5 then
+        wanderTarget = getRandomWanderPosition()
+        print("Wandering to new position...")
+    end
+    
+    humanoid:MoveTo(wanderTarget)
+end
+
+local function mainLoop()
+    while true do
+        wait(0.1)
+        
+        if not enabled then
+            wait(0.5)
+        else
+            character = player.Character
+            if not character then
+                wait(1)
+            else
+                humanoid = character:FindFirstChild("Humanoid")
+                rootPart = character:FindFirstChild("HumanoidRootPart")
+                
+                if not humanoid or not rootPart or humanoid.Health <= 0 then
+                    wait(1)
+                else
+                    spamJump()
+                    
+                    -- Check if we need to go to portal first (only after death/spawn)
+                    if needsPortal then
+                        print("Going to portal after spawn/death...")
+                        humanoid:MoveTo(portal.Position)
+                        
+                        -- Wait until we're close to portal
+                        local startWait = tick()
+                        while (rootPart.Position - portal.Position).Magnitude > 10 and (tick() - startWait) < 10 do
+                            spamJump()
+                            wait(0.5)
+                        end
+                        
+                        print("Reached portal! Now hunting players within 10 studs...")
+                        needsPortal = false
+                    end
+                    
+                    -- If we have a valid target, chase and attack
+                    if currentTarget and isTargetValid(currentTarget) then
+                        local targetRoot = currentTarget.Character.HumanoidRootPart
+                        local distance = (rootPart.Position - targetRoot.Position).Magnitude
+                        
+                        print("Chasing target: " .. currentTarget.Name .. " | Distance: " .. math.floor(distance))
+                        
+                        if distance <= clickDistance then
+                            -- Within attack range
+                            if chaseStartTime == 0 then
+                                chaseStartTime = tick()
+                                print("Started attacking!")
+                            end
+                            
+                            if (tick() - chaseStartTime) >= maxChaseTime then
+                                print("Chase time exceeded, finding new target")
+                                currentTarget = nil
+                                chaseStartTime = 0
+                            else
+                                humanoid:MoveTo(targetRoot.Position)
+                                simulateClick()
+                                wait(clickRate)
+                            end
+                        else
+                            -- Too far, chase them
+                            chaseStartTime = 0
+                            humanoid:MoveTo(targetRoot.Position)
+                            wait(0.3)
+                        end
+                    else
+                        -- No valid target
+                        if currentTarget then
+                            print("Target lost or out of range, searching for new target...")
+                        end
+                        
+                        currentTarget = nil
+                        chaseStartTime = 0
+                        
+                        -- Search for a player within range
+                        local closestPlayer, distance = getClosestRealPlayerInRange()
+                        
+                        if closestPlayer then
+                            -- Found a player within range, lock onto them
+                            currentTarget = closestPlayer
+                            print("NEW TARGET LOCKED: " .. currentTarget.Name .. " | Distance: " .. math.floor(distance) .. " studs")
+                        else
+                            -- No players in range, wander aimlessly
+                            wander()
+                            wait(1)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function toggleScript()
+    enabled = not enabled
+    print(enabled and "Script ENABLED - Targeting REAL PLAYERS within 10 studs" or "Script DISABLED")
+    if not enabled then
+        currentTarget = nil
+        chaseStartTime = 0
+        wanderTarget = nil
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.K then
+        toggleScript()
+    end
+end)
+
+player.CharacterAdded:Connect(function(newChar)
+    wait(1)
+    character = newChar
+    humanoid = character:WaitForChild("Humanoid")
+    rootPart = character:WaitForChild("HumanoidRootPart")
+    currentTarget = nil
+    chaseStartTime = 0
+    needsPortal = true
+    wanderTarget = nil
+    print("Respawned! Will go to portal first...")
+end)
+
+print("Script loaded! Press K to enable/disable")
+print("This script will target REAL PLAYERS within 10 studs only")
+print("Will wander aimlessly if no players in range")
+spawn(mainLoop)
