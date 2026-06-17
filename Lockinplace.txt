@@ -1,0 +1,175 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local waypointCFrame = nil
+local locked = false
+
+local SET_WAYPOINT_KEY = Enum.KeyCode.F5
+local TOGGLE_KEY = Enum.KeyCode.F6
+
+local function getHRP()
+	local character = player.Character
+	if not character then return nil end
+	return character:FindFirstChild("HumanoidRootPart")
+end
+
+local coordBox, lockButton
+
+local function updateLockButton()
+	if not lockButton then return end
+	lockButton.Text = locked and "Lock: ON" or "Lock: OFF"
+	lockButton.TextColor3 = locked and Color3.fromRGB(120, 220, 140) or Color3.fromRGB(220, 220, 220)
+end
+
+local function parseCoords(text)
+	local nums = {}
+	for n in text:gmatch("-?%d+%.?%d*") do
+		table.insert(nums, tonumber(n))
+	end
+	if #nums >= 3 then
+		return Vector3.new(nums[1], nums[2], nums[3])
+	end
+	return nil
+end
+
+local function setWaypoint()
+	local typed = coordBox and parseCoords(coordBox.Text) or nil
+	if typed then
+		waypointCFrame = CFrame.new(typed)
+	else
+		local hrp = getHRP()
+		if hrp then
+			waypointCFrame = hrp.CFrame
+		else
+			warn("[Isaac's Lock] Could not find character.")
+			return
+		end
+	end
+	if coordBox then
+		local p = waypointCFrame.Position
+		coordBox.Text = string.format("%.1f, %.1f, %.1f", p.X, p.Y, p.Z)
+	end
+end
+
+local function toggleLock()
+	if waypointCFrame == nil then
+		warn("[Isaac's Lock] No waypoint set yet.")
+		return
+	end
+	locked = not locked
+	updateLockButton()
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+	if gameProcessedEvent then return end
+	if input.KeyCode == SET_WAYPOINT_KEY then
+		setWaypoint()
+	elseif input.KeyCode == TOGGLE_KEY then
+		toggleLock()
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if locked and waypointCFrame then
+		local hrp = getHRP()
+		if hrp then
+			hrp.CFrame = waypointCFrame
+		end
+	end
+end)
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "IsaacsLockInPlace"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local frame = Instance.new("Frame")
+frame.Name = "MainFrame"
+frame.Size = UDim2.new(0, 200, 0, 140)
+frame.Position = UDim2.new(0, 20, 0.4, 0)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Parent = screenGui
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 8)
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout.Parent = frame
+
+local padding = Instance.new("UIPadding")
+padding.PaddingTop = UDim.new(0, 10)
+padding.PaddingBottom = UDim.new(0, 10)
+padding.PaddingLeft = UDim.new(0, 10)
+padding.PaddingRight = UDim.new(0, 10)
+padding.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, 0, 0, 20)
+title.BackgroundTransparency = 1
+title.Text = "Isaac's Lock In Place"
+title.TextColor3 = Color3.fromRGB(240, 240, 240)
+title.Font = Enum.Font.Gotham
+title.TextSize = 14
+title.LayoutOrder = 1
+title.Parent = frame
+
+coordBox = Instance.new("TextBox")
+coordBox.Name = "CoordBox"
+coordBox.Size = UDim2.new(1, 0, 0, 28)
+coordBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+coordBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+coordBox.PlaceholderText = "X, Y, Z"
+coordBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 140)
+coordBox.Text = ""
+coordBox.Font = Enum.Font.Gotham
+coordBox.TextSize = 13
+coordBox.ClearTextOnFocus = false
+coordBox.BorderSizePixel = 0
+coordBox.LayoutOrder = 2
+coordBox.Parent = frame
+
+local coordBoxCorner = Instance.new("UICorner")
+coordBoxCorner.CornerRadius = UDim.new(0, 4)
+coordBoxCorner.Parent = coordBox
+
+local setButton = Instance.new("TextButton")
+setButton.Name = "SetWaypointButton"
+setButton.Size = UDim2.new(1, 0, 0, 28)
+setButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+setButton.Text = "Set Waypoint"
+setButton.TextColor3 = Color3.fromRGB(220, 220, 220)
+setButton.Font = Enum.Font.Gotham
+setButton.TextSize = 13
+setButton.BorderSizePixel = 0
+setButton.LayoutOrder = 3
+setButton.Parent = frame
+
+local setButtonCorner = Instance.new("UICorner")
+setButtonCorner.CornerRadius = UDim.new(0, 4)
+setButtonCorner.Parent = setButton
+
+lockButton = Instance.new("TextButton")
+lockButton.Name = "ToggleLockButton"
+lockButton.Size = UDim2.new(1, 0, 0, 28)
+lockButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+lockButton.Text = "Lock: OFF"
+lockButton.TextColor3 = Color3.fromRGB(220, 220, 220)
+lockButton.Font = Enum.Font.Gotham
+lockButton.TextSize = 13
+lockButton.BorderSizePixel = 0
+lockButton.LayoutOrder = 4
+lockButton.Parent = frame
+
+local lockButtonCorner = Instance.new("UICorner")
+lockButtonCorner.CornerRadius = UDim.new(0, 4)
+lockButtonCorner.Parent = lockButton
+
+setButton.MouseButton1Click:Connect(setWaypoint)
+lockButton.MouseButton1Click:Connect(toggleLock)
